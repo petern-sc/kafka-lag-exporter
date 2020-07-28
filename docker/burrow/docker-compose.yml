@@ -1,0 +1,55 @@
+version: "2"
+services:
+  burrow:
+    build: .
+    volumes:
+      - ${PWD}/docker-config:/etc/burrow/
+      - ${PWD}/tmp:/var/tmp/burrow
+    ports:
+      - 8000:8000
+    depends_on:
+      - zookeeper
+      - kafka
+    restart: always
+
+  zookeeper:
+    image: wurstmeister/zookeeper
+    ports:
+      - 2181:2181
+
+  kafka:
+    image: wurstmeister/kafka
+    ports:
+      - 9092:9092
+      - 1099:1099
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # KAFKA_ADVERTISED_HOST_NAME: kafka
+      # KAFKA_ADVERTISED_PORT: 9092
+      KAFKA_CREATE_TOPICS: "test-topic:2:1,test-topic2:1:1,test-topic3:1:1"
+      KAFKA_LISTENERS:
+        "INTERNAL://kafka:9090,\
+         EXTERNAL://:9092"
+      KAFKA_ADVERTISED_LISTENERS:
+        "INTERNAL://kafka:9090,\
+         EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:
+        "INTERNAL:PLAINTEXT,\
+         EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      JMX_PORT: 1099
+  
+  kafka-producer-perf-test:
+    image: wurstmeister/kafka:2.12-2.2.0
+    command: >
+      bash -c "until kafka-topics.sh --zookeeper zookeeper:2181 --create --topic replicated-topic --partitions 3 --replication-factor 1 --if-not-exists; do echo \"Waiting for Kafka to be ready..\"; done
+      && kafka-producer-perf-test.sh --topic replicated-topic --num-records 10000000 --record-size 10 --throughput 1000 --producer-props bootstrap.servers=kafka:9090"
+
+  consumer-group1-consumer1:
+    image: wurstmeister/kafka:2.12-2.2.0
+    command: >
+      bash -c "until kafka-topics.sh --zookeeper zookeeper:2181 --create --topic replicated-topic --partitions 3 --replication-factor 1 --if-not-exists; do echo \"Waiting for Kafka to be ready..\"; done
+      && kafka-console-consumer.sh --consumer-property group.id=test-consumer-group --consumer-property client.id=test-client-id-1 --consumer-property enable.auto.commit=true --topic replicated-topic --bootstrap-server kafka:9090  > /dev/null"
+    depends_on:
+      - "kafka"
+      - "zookeeper"
